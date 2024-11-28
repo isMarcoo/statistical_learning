@@ -69,6 +69,7 @@ class Node():
 class DesicianTree():
     def __init__(self):
         self.root = None
+        self.num_leaf = 0
 
     def fit(self, D, A, e):
         '''
@@ -77,14 +78,16 @@ class DesicianTree():
         '''
         # 如果所有实例属于同一类，则返回单节点树
         unique, counts = np.unique(D[:, -1], return_counts=True)
+        index_max_count = np.argmax(counts)
         if len(unique) == 1:
             root = Node(label=unique[0])
+            self.num_leaf += 1
             return root
         
         # 如果特征集为空，则选择数量最多的标签作为叶子节点的标签
         if len(A) == 0:
-            index = np.argmax(counts)
-            root = Node(label=unique[index])
+            root = Node(label=unique[index_max_count])
+            self.num_leaf += 1
             return root
 
         # 选择最大信息增益的特征
@@ -95,13 +98,12 @@ class DesicianTree():
 
         # 若信息增益小于阈值，则简化为单节点树
         if information_gains[index] < e:
-            index = np.argmax(counts)
-            root = Node(label=unique[index])
+            root = Node(label=unique[index_max_count])
             return root
         
         selected_feature = A[index]
         selected_column = D[:, selected_feature]
-        root = Node(feature=selected_feature)
+        root = Node(feature=selected_feature, label=unique[index_max_count])
 
         unique, counts = np.unique(selected_column, return_counts=True)
         grouped_data = [(key, D[selected_column==key]) for key in unique]
@@ -109,7 +111,56 @@ class DesicianTree():
         for (key, data) in grouped_data:
             root.childs[key] = self.fit(data, A, e)
 
+        self.root = root
         return root
+    
+    def printTree(self, tree):
+        '''
+        先序遍历
+        '''
+        print(tree.feature)
+        if tree.childs:
+            for key, child in tree.childs.items():
+                self.printTree(child)
+
+    def predict(self, tree, x):
+        '''
+        预测
+        '''
+        featureLabel = x[tree.feature]
+        if not tree.childs:
+            label = tree.label
+        else:
+            label = self.predict(tree.childs[featureLabel], x)
+        
+        return label
+    
+    def prune(self, tree, D, alpha):
+        '''
+        根据损失函数后剪枝
+        '''
+        emp_entropy = empirical_entropy(D, -1)
+        selected_column = D[:, tree.feature]
+        child_emp_entropy = 0
+        if tree.childs:
+            for key, child in tree.childs.items():
+                child_emp_entropy += self.prune(child, D[selected_column==key], alpha)
+                
+            # 一旦经验熵的增大小于复杂度的减小，则可以剪枝 
+            if emp_entropy - child_emp_entropy <= alpha * (len(tree.childs) - 1):
+                # todo 裁剪
+                unique, counts = np.unique(selected_column, return_counts=True)
+                tree.label = unique[np.argmax(counts)]
+                tree.childs = []
+                self.root = tree
+                return emp_entropy
+            else:
+                # 若不需要剪枝，则该节点的父节点考虑损失时应该用该节点的子节点返回的数值
+                return child_emp_entropy
+
+        self.root = tree
+        return emp_entropy
+    
 
 if __name__ == '__main__':
     data = np.array([
@@ -131,5 +182,7 @@ if __name__ == '__main__':
     ])
 
     desicianTree = DesicianTree()
-    desicianTree = desicianTree.fit(data, [0,1,2,3], 0.001)
-    print(desicianTree)
+    tree = desicianTree.fit(data, [0,1,2,3], 0.001)
+    desicianTree.printTree(tree)
+    desicianTree.prune(tree, data, 1)
+    desicianTree.printTree(desicianTree.root)
